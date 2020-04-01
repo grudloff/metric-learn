@@ -23,7 +23,8 @@ class _BaseSCML(MahalanobisMixin):
 
   def __init__(self, beta=1e-5, basis='triplet_diffs', n_basis=None,
                gamma=5e-3, max_iter=10000, output_iter=500, batch_size=10,
-               verbose=False, preprocessor=None, random_state=None):
+               verbose=False, preprocessor=None, random_state=None,
+               delta=0.001, optimizer='adagrad'):
     self.beta = beta
     self.basis = basis
     self.n_basis = n_basis
@@ -34,6 +35,8 @@ class _BaseSCML(MahalanobisMixin):
     self.verbose = verbose
     self.preprocessor = preprocessor
     self.random_state = random_state
+    self.delta = delta
+    self.optimizer = optimizer
     super(_BaseSCML, self).__init__(preprocessor)
 
   def _fit(self, triplets, basis=None, n_basis=None):
@@ -79,10 +82,11 @@ class _BaseSCML(MahalanobisMixin):
     # avarage obj gradient wrt weights
     avg_grad_w = np.zeros((1, n_basis))
 
-    # l2 norm in time of all obj gradients wrt weights
-    ada_grad_w = np.zeros((1, n_basis))
+    if self.optimizer == 'adagrad':
+      # l2 norm in time of all obj gradients wrt weights
+      ada_grad_w = np.zeros((1, n_basis))
     # slack for not dividing by zero
-    delta = 0.001
+    # delta = 0.001
 
     best_obj = np.inf
 
@@ -100,9 +104,12 @@ class _BaseSCML(MahalanobisMixin):
                       axis=0, keepdims=True)/self.batch_size
       avg_grad_w = (iter * avg_grad_w + grad_w) / (iter+1)
 
-      ada_grad_w = np.sqrt(np.square(ada_grad_w) + np.square(grad_w))
+      if self.optimizer == "adagrad":
+        ada_grad_w = np.sqrt(np.square(ada_grad_w) + np.square(grad_w))
+        scale_f = -(iter+1) / self.gamma / (self.delta + ada_grad_w)
 
-      scale_f = -(iter+1) / self.gamma / (delta + ada_grad_w)
+      elif self.optimizer == 'vanilla':
+        scale_f = -np.sqrt(iter+1) / self.gamma
 
       # proximal operator with negative trimming equivalent
       w = scale_f * np.minimum(avg_grad_w + self.beta, 0)
@@ -493,13 +500,16 @@ class SCML_Supervised(_BaseSCML, TransformerMixin):
   def __init__(self, k_genuine=3, k_impostor=10, beta=1e-5, basis='lda',
                n_basis=None, gamma=5e-3, max_iter=10000, output_iter=500,
                batch_size=10, verbose=False, preprocessor=None,
-               random_state=None):
+               random_state=None, delta=0.001, scales=None,
+               optimizer='adagrad'):
     self.k_genuine = k_genuine
     self.k_impostor = k_impostor
+    self.scales = scales
     _BaseSCML.__init__(self, beta=beta, basis=basis, n_basis=n_basis,
                        max_iter=max_iter, output_iter=output_iter,
                        batch_size=batch_size, verbose=verbose,
-                       preprocessor=preprocessor, random_state=random_state)
+                       preprocessor=preprocessor, random_state=random_state,
+                       delta=delta, optimizer=optimizer)
 
   def fit(self, X, y):
     """Create constraints from labels and learn the SCML model.
@@ -593,11 +603,14 @@ class SCML_Supervised(_BaseSCML, TransformerMixin):
                     algorithm='elkan').fit(X)
     cX = kmeans.cluster_centers_
 
-    n_scales = 2
-    if n_features > 50:
-      scales = [20, 50]
+    if self.scales is None:
+      n_scales = 2
+      if n_features > 50:
+        scales = [20, 50]
+      else:
+        scales = [10, 20]
     else:
-      scales = [10, 20]
+      scales = self.scales
 
     k_class = np.vstack((np.minimum(class_count, scales[0]),
                          np.minimum(class_count, scales[1])))
