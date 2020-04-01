@@ -82,6 +82,8 @@ class _BaseSCML(MahalanobisMixin):
     # avarage obj gradient wrt weights
     avg_grad_w = np.zeros((1, n_basis))
 
+    log = np.array([]).reshape(0, 2)
+
     if self.optimizer == 'adagrad':
       # l2 norm in time of all obj gradients wrt weights
       ada_grad_w = np.zeros((1, n_basis))
@@ -128,8 +130,8 @@ class _BaseSCML(MahalanobisMixin):
         obj2 = np.sum(slack_val[slack_mask])/n_triplets
 
         obj = obj1 + obj2
+        count = np.sum(slack_mask)
         if self.verbose:
-          count = np.sum(slack_mask)
           print("[%s] iter %d\t obj %.6f\t num_imp %d" %
                 (self.__class__.__name__, (iter+1), obj, count))
 
@@ -138,6 +140,8 @@ class _BaseSCML(MahalanobisMixin):
           best_obj = obj
           best_w = w
 
+        np.vstack((log, [np.array([obj, count])]))
+
     if self.verbose:
       print("max iteration reached.")
 
@@ -145,7 +149,7 @@ class _BaseSCML(MahalanobisMixin):
     self.n_iter_ = iter
     self.components_ = self._components_from_basis_weights(basis, best_w)
 
-    return self
+    return log
 
   def _compute_dist_diff(self, triplets, X, basis):
     """
